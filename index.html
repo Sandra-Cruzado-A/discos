@@ -153,6 +153,9 @@ textarea.inp{min-height:180px;resize:vertical;font-size:14px;line-height:1.4}
 .fig .views button[aria-pressed="true"]{background:var(--surface);box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .set.skipped input{opacity:.45;text-decoration:line-through}
 .set.skipped .tick{border-style:dashed}
+.set .tick.undo{border-style:dashed;border-color:var(--ink-2)}
+.set .tick.undo svg{stroke:var(--ink)}
+.skiptag{grid-column:2/5;font-size:12px;font-weight:650;color:var(--ink-2);margin-top:-2px}
 .combo-t{margin:6px 0 0;font-weight:650}
 .fig .ctl a,.fig .ctl button{min-height:34px;font-size:13px}
 
@@ -958,12 +961,8 @@ function suggestion(pid, ex, dateCtx) {
   if (!last) return res;
   const lmid = pctMid(last.en.target);
   if (mid != null && lmid != null && Math.abs(mid - lmid) > 0.01) { res.kg = fit(last.top * mid / lmid); res.why = 'scale'; res.lastPct = lmid; return res; }
-  if (mid != null && ex.unit === 'reps' && last.completed && step > 0) {
-    res.kg = fit(last.top + step); res.why = 'up';
-    if (res.kg <= last.top) { res.kg = last.top; res.why = 'max'; }
-    return res;
-  }
-  res.kg = last.top; res.why = mid != null && !last.completed ? 'hold' : 'last';
+  // Sin subidas automáticas: con el mismo porcentaje, el mismo peso
+  res.kg = last.top; res.why = mid != null ? 'same' : 'last';
   return res;
 }
 function gym() {
@@ -1632,6 +1631,7 @@ function personHTML(i, pid) {
   else if (sg.why === 'max') why = `El ${fDate(L.date)} completaste todo con ${fk(L.top)} kg, que es lo máximo que hay en el gimnasio: repite.`;
   else if (sg.why === 'hold') why = L.en.sets.some(x => x.skip && !x.done) ? `El ${fDate(L.date)} saltaste alguna serie con ${fk(L.top)} kg: repite ese peso.` : `El ${fDate(L.date)} faltaron repeticiones con ${fk(L.top)} kg: repite ese peso.`;
   else if (sg.why === 'scale') why = `El ${fDate(L.date)} usaste ${fk(L.top)} kg al ${fk(sg.lastPct)} %; hoy la rutina marca el ${pt}.`;
+  else if (sg.why === 'same') why = `El ${fDate(L.date)} usaste ${fk(L.top)} kg al ${pctText(L.en.target) || pt}; hoy toca el mismo porcentaje, así que el mismo peso.`;
   else if (sg.why === 'last') why = `Es lo que usaste el ${fDate(L.date)}.`;
   else if (ex.pMin != null) why = `Primera vez: apunta el peso que uses${perDb ? ' (el total de las dos mancuernas)' : ''}. Desde la próxima sesión se calcula solo con lo que hagas hoy y los porcentajes de la rutina.`;
   else if (bw) why = `Peso corporal: deja los kilos en blanco si no usas lastre.`;
@@ -1648,7 +1648,9 @@ function personHTML(i, pid) {
       <div class="nin"><input inputmode="decimal" enterkeyhint="next" data-f="kg" data-i="${i}" data-j="${j}" data-pid="${pid}" value="${shown[j] != null ? fk(shown[j]) : ''}" placeholder="0" aria-label="Kilos de ${esc(p.name)}, serie ${j + 1}"><span>kg</span></div>
       <span class="x">×</span>
       <div class="nin"><input inputmode="numeric" enterkeyhint="done" data-f="reps" data-i="${i}" data-j="${j}" data-pid="${pid}" value="${s.reps != null ? s.reps : ''}" placeholder="${ex.reps}" aria-label="${ex.unit === 's' ? 'Segundos' : ex.unit === 'm' ? 'Metros' : 'Repeticiones'} de ${esc(p.name)}, serie ${j + 1}"><span>${u}</span></div>
-      <button class="tick" data-act="tick" data-i="${i}" data-j="${j}" data-pid="${pid}" aria-pressed="${s.done}" aria-label="${s.skip ? `Serie ${j + 1} de ${esc(p.name)} saltada; toca para marcarla como hecha` : `Serie ${j + 1} de ${esc(p.name)} hecha`}"><svg viewBox="0 0 24 24"><path d="${s.skip ? 'M4 12h12M12 6.5l5.5 5.5-5.5 5.5' : 'M5 12.5l4.5 4.5L19 7.5'}"/></svg></button>
+      ${s.skip && !s.done ? `<button class="tick undo" data-act="unskip" data-i="${i}" data-j="${j}" data-pid="${pid}" aria-label="Serie ${j + 1} de ${esc(p.name)} saltada; toca para deshacer el salto"><svg viewBox="0 0 24 24"><path d="M9 7L4.5 11.5 9 16M5 11.5h9a5 5 0 0 1 0 10h-2"/></svg></button>`
+        : `<button class="tick" data-act="tick" data-i="${i}" data-j="${j}" data-pid="${pid}" aria-pressed="${s.done}" aria-label="Serie ${j + 1} de ${esc(p.name)} hecha"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>`}
+      ${s.skip && !s.done ? `<span class="skiptag">Saltada · toca la flecha para deshacer</span>` : ''}
       ${ex.unit === 's' && !s.done ? `<button class="btn sm play" data-act="work" data-sec="${ex.reps}">Cronómetro ${ex.reps} s</button>` : ''}
     </div>`).join('');
   const all = handledN(en) >= ex.sets;
@@ -2142,7 +2144,7 @@ function viewProgress() {
     const sg = suggestion(pid, exDef, null);
     const perDb = (info(exDef).equip === 'dumbbell' || info(exDef).dbOpt) && (info(exDef).dbN || 1) === 2;
     h += `<div class="card" style="--day:${colorVar(p.color)}"><div class="orm"><div><div class="small muted">Próxima sesión${exDef.pMin != null ? ' · ' + esc(pctText(exDef)) : ''}</div><b class="display num">${sg.kg != null ? fk(sg.kg) : '—'}<small style="font-size:18px;margin-left:4px">kg${perDb ? ' total' : ''}</small></b></div></div>
-      <p class="small muted" style="margin:4px 0 0">${sg.kg == null ? 'Se calculará cuando apuntes la primera sesión de este ejercicio.' : sg.why === 'up' ? 'Completaste todo la última vez: sube un escalón.' : sg.why === 'hold' ? (sg.last.en.sets.some(x => x.skip && !x.done) ? 'La última vez saltaste alguna serie: se repite el peso.' : 'La última vez faltaron repeticiones: se repite el peso.') : sg.why === 'scale' ? 'Ajustado al porcentaje que marca la rutina.' : 'El mismo peso que la última vez.'}</p>${sg.kg != null ? comboHTML(sg.kg, info(exDef)) : ''}</div>`;
+      <p class="small muted" style="margin:4px 0 0">${sg.kg == null ? 'Se calculará cuando apuntes la primera sesión de este ejercicio.' : sg.why === 'up' ? 'Completaste todo la última vez: sube un escalón.' : sg.why === 'hold' ? (sg.last.en.sets.some(x => x.skip && !x.done) ? 'La última vez saltaste alguna serie: se repite el peso.' : 'La última vez faltaron repeticiones: se repite el peso.') : sg.why === 'scale' ? 'Ajustado al porcentaje que marca la rutina.' : (sg.why === 'same' ? 'Mismo porcentaje que la última vez: mismo peso.' : 'El mismo peso que la última vez.')}</p>${sg.kg != null ? comboHTML(sg.kg, info(exDef)) : ''}</div>`;
   }
   if (!hist.length) return h + `<div class="empty">Aún no hay series apuntadas de este ejercicio${S.app.profiles.length > 1 ? ' para ' + esc(p.name) : ''}.</div>`;
   const hasVol = hist.some(x => x.vol > 0);
@@ -2339,10 +2341,14 @@ const ACT = {
     const s = S.sessions[t.dataset.id]; if (!s) return; const p = profile(s.pid);
     sheetConfirm(`Se borrará el entreno del ${esc(fDateLong(s.date))} (${esc((s.dayTitle || '').replace(/^Día \d+:\s*/, ''))})${S.app.profiles.length > 1 && p ? ' de ' + esc(p.name) : ''}, con todas sus series. No se puede deshacer.`, 'Eliminar entreno', () => deleteSession(s.id));
   },
+  unskip: t => {
+    const i = +t.dataset.i, j = +t.dataset.j, pid = t.dataset.pid; const en = getEntry(pid, i, false); const s = en && en.sets[j];
+    if (!s) return; s.skip = false; saveSession(sessionId(pid)); rerenderPerson(i, pid); renderHead(); toast(`Serie ${j + 1} recuperada`);
+  },
   'skip-set': t => {
     const i = +t.dataset.i, pid = t.dataset.pid; const en = getEntry(pid, i, true);
     const s = en.sets.find(x => !x.done && !x.skip); if (!s) return;
-    s.skip = true; saveSession(sessionId(pid)); rerenderPerson(i, pid); renderHead();
+    s.skip = true; saveSession(sessionId(pid)); rerenderPerson(i, pid); renderHead(); toast(`Serie ${en.sets.indexOf(s) + 1} saltada. Puedes deshacerlo con la flecha.`);
   },
   'edit-entry': t => sheetEditEntry(t.dataset.sid, t.dataset.k),
   'edit-tick': t => { const on = t.getAttribute('aria-pressed') !== 'true'; t.setAttribute('aria-pressed', on ? 'true' : 'false'); t.closest('.set').classList.toggle('done', on); },
