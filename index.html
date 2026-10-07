@@ -416,6 +416,13 @@ h2.sec{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--
 .wk-n{text-align:right;font-size:13px;font-weight:700}
 .wk-n small{display:block;font-size:12px;font-weight:600;color:var(--ink-2)}
 .card.list{padding:4px 6px}
+.tech-h{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.tech-h > div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.score-b{flex:none;font-size:24px;font-weight:800;letter-spacing:-.03em;background:var(--surface-2);border-radius:12px;padding:4px 10px}
+.score-b small{font-size:13px;color:var(--ink-2);font-weight:700}
+.vbox{margin-top:10px}
+.vbox video{width:100%;max-height:60vh;border-radius:14px;background:#000}
+.vbox .frames{margin-bottom:8px}
 .sess{display:flex;align-items:center;gap:6px}
 .sess + .sess{border-top:1px solid var(--line)}
 .sess-main{flex:1;min-width:0;display:flex;align-items:center;gap:12px;background:none;border:0;padding:10px 6px;text-align:left}
@@ -1300,12 +1307,12 @@ function plateSVG(total) {
 }
 
 /* ---------- gráfica ---------- */
-function chartSVG(pts, unit) {
+function chartSVG(pts, unit, fixed) {
   if (!pts.length) return '';
   const W = 340, H = 190, pl = 40, pr = 12, pt = 14, pb = 28;
   const xs = pts.map(p => parseISO(p.date).getTime()), ys = pts.map(p => p.y);
   let x0 = Math.min(...xs), x1 = Math.max(...xs); if (x0 === x1) { x0 -= 864e5 * 3; x1 += 864e5 * 3; }
-  let y0 = Math.min(...ys), y1 = Math.max(...ys); const pad = Math.max(2, (y1 - y0) * 0.15); y0 = Math.max(0, y0 - pad); y1 += pad;
+  let y0 = Math.min(...ys), y1 = Math.max(...ys); const pad = Math.max(2, (y1 - y0) * 0.15); y0 = Math.max(0, y0 - pad); y1 += pad; if (fixed) { y0 = fixed[0]; y1 = fixed[1]; }
   const X = v => pl + (v - x0) / (x1 - x0) * (W - pl - pr), Y = v => pt + (1 - (v - y0) / (y1 - y0)) * (H - pt - pb);
   const ticks = [y0, (y0 + y1) / 2, y1];
   const grid = ticks.map(v => `<line x1="${pl}" x2="${W - pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${pl - 6}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="var(--ink-2)">${fk(Math.round(v))}</text>`).join('');
@@ -1331,6 +1338,8 @@ function render() {
   const v = S.view;
   const html = v === 'calendar' ? viewCalendar() : v === 'progress' ? viewProgress() : v === 'settings' ? viewSettings() : viewHome();
   $('#app').innerHTML = `<div class="wrap">${html}</div>`;
+  if (v === 'progress' && S.prog.tab === 'tech') hydrateTech();
+  if (v === 'settings') fillVideoUsage();
 }
 function viewHome() {
   const r = routine();
@@ -1709,7 +1718,7 @@ function renderRec(i) {
       <label class="btn">Elegir de la galería<input class="vh" type="file" accept="video/*" data-vid="${i}"></label>
     </div>`;
   if (v) {
-    if (v.url) h += `<div class="preview" style="margin-top:12px"><video src="${v.url}" controls playsinline muted preload="metadata"></video></div>`;
+    if (v.url) h += `<div class="preview" style="margin-top:12px"><video src="${v.url}" controls playsinline muted preload="metadata"></video></div>${v.saved ? '<p class="tiny muted" style="margin:6px 0 0">Guardado en este móvil. Lo tienes también en Progreso → Técnica.</p>' : ''}`;
     if (v.busy === 'frames') h += `<p class="note small"><span class="spin"></span> Sacando fotogramas del vídeo…</p>`;
     if (v.err) h += `<p class="warn small">${esc(v.err)}</p>`;
     if (v.frames && v.frames.length) {
@@ -1736,6 +1745,7 @@ function aiHTML(ai, nFrames) {
   let h = `<div class="ai-out">`;
   if (ai.puntuacion != null) h += `<div class="score"><b class="display num">${ai.puntuacion}<span class="muted" style="font-size:22px">/10</span></b><span class="small muted">Nota de técnica${ai.date && ai.date !== todayISO() ? ' · ' + esc(fDate(ai.date)) : ''}</span></div>`;
   if (ai.resumen) h += `<p>${esc(ai.resumen)}</p>`;
+  if (ai.comparacion) h += `<p class="note small"><b>Respecto a la vez anterior:</b> ${esc(ai.comparacion)}</p>`;
   if (ai.seguridad) h += `<p class="warn small"><b>Ojo:</b> ${esc(ai.seguridad)}</p>`;
   if (ai.corregir && ai.corregir.length) h += `<h4>Qué corregir</h4><ul class="fixes">${ai.corregir.map(c => `<li><b>${esc(c.problema)}</b>${esc(c.como)}${c.fotogramas && c.fotogramas.length ? `<div class="tiny muted">Fotograma${c.fotogramas.length > 1 ? 's' : ''} ${c.fotogramas.join(', ')}</div>` : ''}</li>`).join('')}</ul>`;
   if (ai.bien && ai.bien.length) h += `<h4>Lo que haces bien</h4><ul class="good small">${ai.bien.map(t => `<li>${esc(t)}</li>`).join('')}</ul>`;
@@ -1797,6 +1807,35 @@ async function extractFrames(file, n) {
   }
   return {url, frames, dur: Math.round(dur * 10) / 10};
 }
+/* Vídeos guardados solo en este móvil (IndexedDB): no se suben a ningún sitio */
+const MEDIA = (() => {
+  let dbp = null;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    try { const r = indexedDB.open('discos-media', 1); r.onupgradeneeded = () => { const db = r.result; if (!db.objectStoreNames.contains('videos')) db.createObjectStore('videos', {keyPath: 'id'}); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }
+    catch (e) { rej(e); }
+  }));
+  const run = async (mode, fn) => { const db = await open(); return new Promise((res, rej) => { const tx = db.transaction('videos', mode), st = tx.objectStore('videos'); let out; fn(st, v => { out = v; }); tx.oncomplete = () => res(out); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error); }); };
+  return {
+    put: rec => run('readwrite', st => st.put(rec)),
+    get: id => run('readonly', (st, set) => { const r = st.get(id); r.onsuccess = () => set(r.result || null); }),
+    del: id => run('readwrite', st => st.delete(id)),
+    clear: () => run('readwrite', st => st.clear()),
+    list: () => run('readonly', (st, set) => { const out = []; const r = st.openCursor(); r.onsuccess = () => { const c = r.result; if (c) { const v = c.value; out.push({id: v.id, sid: v.sid, pid: v.pid, size: v.size || 0}); c.continue(); } else set(out); }; })
+  };
+})();
+const keepVideos = () => S.app.settings.keepVideos !== false;
+async function saveVideo(pid, i, file, r) {
+  if (!keepVideos()) return false;
+  const ex = curEx(i), sid = sessionId(pid);
+  const rec = {id: `${sid}|${i}`, sid, k: i, pid, key: ex.key, name: ex.name, date: S.live.date, blob: file, type: file.type || 'video/mp4', size: file.size || 0, dur: r.dur, thumbs: r.frames.map(f => f.thumb), at: Date.now()};
+  try {
+    await MEDIA.put(rec);
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch {}
+    const en = getEntry(pid, i, true); en.video = {at: rec.at, dur: rec.dur, size: rec.size}; saveSession(sid);
+    return true;
+  } catch (e) { toast('No se ha podido guardar el vídeo en el móvil (puede que falte espacio).'); return false; }
+}
+function mediaDelWhere(fn) { return MEDIA.list().then(all => Promise.all(all.filter(fn).map(x => MEDIA.del(x.id)))).catch(() => {}); }
 async function handleVideo(i, file) {
   if (!file || !S.live) return;
   const pid = recPid(i), k = vidKey(pid, i);
@@ -1806,6 +1845,7 @@ async function handleVideo(i, file) {
   try {
     const r = await extractFrames(file, frameCount());
     VID[k] = {url: r.url, frames: r.frames, dur: r.dur};
+    VID[k].saved = await saveVideo(pid, i, file, r);
   } catch (e) {
     VID[k] = {err: e && e.message === 'big' ? 'El vídeo es demasiado grande. Graba un clip más corto (5–20 s).' : 'No se ha podido leer el vídeo en este navegador. Prueba con otro vídeo más corto o grábalo con la cámara normal del móvil.'};
   }
@@ -1817,13 +1857,15 @@ function cleanAi(j) {
   const sc = j.puntuacion == null || j.puntuacion === '' || !isFinite(+j.puntuacion) ? null : clamp(Math.round(+j.puntuacion), 1, 10);
   return {puntuacion: sc, resumen: String(j.resumen || '').trim(), bien: arr(j.bien),
     corregir: (Array.isArray(j.corregir) ? j.corregir : []).filter(c => c && c.problema).slice(0, 5).map(c => ({problema: String(c.problema), como: String(c.como || ''), fotogramas: (Array.isArray(c.fotogramas) ? c.fotogramas : []).map(Number).filter(x => x >= 1 && x <= 20).slice(0, 6)})),
-    seguridad: String(j.seguridad || '').trim(), grabacion: String(j.grabacion || '').trim()};
+    seguridad: String(j.seguridad || '').trim(), grabacion: String(j.grabacion || '').trim(), comparacion: String(j.comparacion || '').trim()};
 }
 async function analyze(i) {
   const pid = recPid(i), k = vidKey(pid, i), v = VID[k];
   if (!v || !v.frames || !v.frames.length || !recAvailable()) return;
   const {d} = liveDay(); const ex = d.exercises[i]; const inf = info(ex);
   const nm = f => (f || []).map(x => MUSCLES[x]).filter(Boolean).join(', ');
+  const prevA = techItems(pid, ex.key).filter(x => x.en.ai && x.date < S.live.date).pop();
+  const prevTxt = prevA ? `\nAnálisis anterior de esta persona en este ejercicio (${fDate(prevA.date)}): nota ${prevA.en.ai.puntuacion ?? 'sin nota'}/10. Resumen: ${prevA.en.ai.resumen || '—'}. Correcciones que se le pidieron: ${(prevA.en.ai.corregir || []).map(c => c.problema).join('; ') || 'ninguna'}.\nCompara con lo que ves ahora y rellena "comparacion" con 1-2 frases: qué ha mejorado y qué sigue igual o ha empeorado. Si no se puede comparar (otro ángulo, no se aprecia), dilo.` : '';
   const prompt = `Eres un entrenador de fuerza experto en técnica. Te paso ${v.frames.length} fotogramas en orden cronológico (numerados del 1 al ${v.frames.length}) sacados de un vídeo de unos ${fk(v.dur)} s, en los segundos ${v.frames.map(f => fk(f.t)).join(', ')}. En el vídeo, una persona hace este ejercicio: «${ex.name}».
 Prescripción: ${ex.sets} series × ${ex.reps}${ex.repsMax ? '–' + ex.repsMax : ''} ${unitLabel(ex.unit)}${perLabel(ex.per)}${ex.loadText ? ', carga ' + ex.loadText : ''}.
 Claves técnicas de referencia:
@@ -1832,7 +1874,7 @@ Músculos principales: ${nm(inf.pri) || 'no indicados'}.
 Analiza SOLO la técnica que se ve en las imágenes. Sé concreto, prudente y práctico: si algo no se aprecia (ángulo, oscuridad, cuerpo cortado), dilo en lugar de suponerlo. Si las imágenes no muestran este ejercicio, dilo en el resumen y deja la puntuación en null. No identifiques a la persona ni comentes su físico. Español de España, tuteando, frases cortas.
 Responde SOLO con JSON con esta forma:
 {"puntuacion": 7, "resumen": "1-2 frases con lo más importante", "bien": ["2-4 cosas que hace bien"], "corregir": [{"problema": "qué falla", "como": "cómo corregirlo, con una indicación que se pueda aplicar en la siguiente serie", "fotogramas": [3, 4]}], "seguridad": "riesgo de lesión claro o cadena vacía", "grabacion": "cómo mejorar la grabación para el próximo análisis, o cadena vacía"}
-"puntuacion" es un entero del 1 al 10 (calidad técnica global) o null. Máximo 4 correcciones, de la más a la menos importante.`;
+"puntuacion" es un entero del 1 al 10 (calidad técnica global) o null. Máximo 4 correcciones, de la más a la menos importante. Añade también "comparacion" (cadena; vacía si no hay análisis anterior).${prevTxt}`;
   v.ctl = new AbortController(); v.busy = 'ai'; v.err = null; renderRec(i);
   try {
     const j = await S.sample.json(prompt, {images: v.frames.map(f => f.blob), modelTier: 'default', signal: v.ctl.signal});
@@ -2102,6 +2144,7 @@ function deleteSession(id) {
   const s = S.sessions[id]; if (!s) return;
   delete S.sessions[id]; LS.set('sessions', S.sessions);
   if (S.sessCol) remoteWrite(id, () => S.sessCol.doc(id).delete());
+  mediaDelWhere(x => x.sid === id);
   if (S.live && S.live.date === s.date && S.live.routineId === s.routineId && S.live.dayIdx === s.dayIdx && S.live.parts.includes(s.pid)) {
     S.live.parts = S.live.parts.filter(x => x !== s.pid); if (!S.live.parts.length) S.live = null; saveLive();
   }
@@ -2138,6 +2181,8 @@ function viewProgress() {
   if (!opts.length) return h + `<div class="empty">Todavía no hay ejercicios. Pega una rutina o entrena un día para ver aquí tu evolución.</div>`;
   h += `<label class="field"><span>Ejercicio</span><select class="inp" data-ch="prog-ex">${opts.map(o => `<option value="${esc(o.key)}" ${o.key === P.key ? 'selected' : ''}>${esc(o.name)}${o.n ? ` (${o.n})` : ''}</option>`).join('')}</select></label>`;
   const key = P.key;
+  h += `<div class="seg-ctl" role="group" aria-label="Qué ver">${[['w', 'Pesos'], ['tech', 'Técnica y vídeos']].map(([k, l]) => `<button aria-pressed="${(P.tab || 'w') === k}" data-act="prog-tab" data-v="${k}">${l}</button>`).join('')}</div>`;
+  if (P.tab === 'tech') return h + viewTech(pid, key, p);
   const exDef = (() => { const r = routine(); for (const d of (r ? r.days : [])) for (const ex of d.exercises) if (ex.key === key) return ex; return null; })();
   const hist = history(pid, key);
   if (exDef) {
@@ -2169,6 +2214,60 @@ function viewProgress() {
   return h;
 }
 /* ---------- perfiles y ajustes ---------- */
+function techItems(pid, key) {
+  const out = [];
+  for (const s of Object.values(S.sessions)) if (s.pid === pid) for (const k in (s.entries || {})) { const en = s.entries[k]; if (en && en.key === key && (en.ai || en.video)) out.push({s, k, en, date: s.date}); }
+  return out.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+}
+function viewTech(pid, key, p) {
+  const items = techItems(pid, key), multi = S.app.profiles.length > 1;
+  if (!items.length) return `<div class="empty">Todavía no hay vídeos ni correcciones de este ejercicio${multi ? ' para ' + esc(p.name) : ''}. Grábate en la pestaña «Grábate» del ejercicio: aquí verás tus vídeos y cómo evoluciona tu técnica.</div>`;
+  let h = '';
+  const scored = items.filter(x => x.en.ai && x.en.ai.puntuacion != null);
+  if (scored.length) {
+    const byD = {}; scored.forEach(x => { byD[x.date] = {date: x.date, y: x.en.ai.puntuacion}; });
+    const series = Object.values(byD).sort((a, b) => a.date < b.date ? -1 : 1);
+    const first = series[0].y, last = series[series.length - 1].y, diff = last - first;
+    h += `<div class="card chart" style="--day:${colorVar(p.color)}"><h3>Nota de técnica</h3>${chartSVG(series, '/10', [0, 10])}</div>
+      <div class="stats"><div><b class="num display">${scored.length}</b><span>análisis</span></div><div><b class="num display">${last}<small style="font-size:14px">/10</small></b><span>última nota</span></div><div><b class="num display">${series.length > 1 ? (diff > 0 ? '+' : '') + diff : '—'}</b><span>desde el primero</span></div></div>`;
+  }
+  h += `<h2 class="sec">Sesiones</h2>`;
+  h += items.slice().reverse().map(x => {
+    const id = `${x.s.id}|${x.k}`, ai = x.en.ai, st = entryStats(x.en);
+    const fixes = ai && ai.corregir && ai.corregir.length ? `<details class="prev"><summary>Qué corregir (${ai.corregir.length})</summary><ul class="fixes">${ai.corregir.map(c => `<li><b>${esc(c.problema)}</b>${esc(c.como)}</li>`).join('')}</ul></details>` : '';
+    return `<div class="card tech"><div class="tech-h"><div><b>${esc(fDateLong(x.date).replace(/^./, c => c.toUpperCase()))}</b><span class="small muted">${st ? setsLine(x.en).replace(/ · técnica \d+\/10/, '') : 'Sin series apuntadas'}</span></div>${ai && ai.puntuacion != null ? `<span class="score-b">${ai.puntuacion}<small>/10</small></span>` : ''}</div>
+      ${x.en.video ? `<div class="vbox" data-media="${esc(id)}"><p class="tiny muted">Cargando vídeo…</p></div>` : ''}
+      ${ai ? `${ai.resumen ? `<p style="margin:10px 0 6px">${esc(ai.resumen)}</p>` : ''}${ai.comparacion ? `<p class="note small"><b>Respecto a la vez anterior:</b> ${esc(ai.comparacion)}</p>` : ''}${fixes}` : `<p class="small muted" style="margin:8px 0 0">Vídeo sin analizar.</p>`}</div>`;
+  }).join('');
+  return h;
+}
+function hydrateTech() {
+  $$('.vbox[data-media]').forEach(box => {
+    const id = box.dataset.media;
+    MEDIA.get(id).then(rec => {
+      if (!box.isConnected) return;
+      if (!rec) { box.innerHTML = '<p class="tiny muted">Este vídeo no está guardado en este móvil.</p>'; return; }
+      const [sid, k] = id.split('|'); const s = S.sessions[sid], en = s && s.entries[k];
+      const flagged = new Set(((en && en.ai && en.ai.corregir) || []).flatMap(c => c.fotogramas || []));
+      box.innerHTML = `<div class="frames">${(rec.thumbs || []).map((th, n) => `<figure class="${flagged.has(n + 1) ? 'flag' : ''}"><img src="${th}" alt="Fotograma ${n + 1}"><figcaption>${n + 1}</figcaption></figure>`).join('')}</div>
+        <div class="row" style="align-items:center"><button class="btn sm" data-act="tech-play" data-media="${esc(id)}">Ver vídeo</button><button class="btn sm ghost" data-act="tech-delvid" data-media="${esc(id)}">Borrar vídeo</button><span class="tiny muted">${fk(Math.round((rec.size || 0) / 1e5) / 10)} MB</span></div>`;
+    }).catch(() => { box.innerHTML = '<p class="tiny muted">No se ha podido abrir el vídeo.</p>'; });
+  });
+}
+function playStored(box, blob) {
+  const v = document.createElement('video'); v.controls = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'metadata';
+  let url = null; try { url = URL.createObjectURL(blob); } catch {}
+  const asData = () => { const r = new FileReader(); r.onload = () => { v.src = r.result; }; r.readAsDataURL(blob); };
+  v.addEventListener('error', () => { if (url && v.src.startsWith('blob:')) { try { URL.revokeObjectURL(url); } catch {} url = null; asData(); } }, {once: true});
+  if (url) v.src = url; else asData();
+  box.innerHTML = ''; box.appendChild(v);
+  try { v.play().catch(() => {}); } catch {}
+}
+function fillVideoUsage() {
+  const el = $('#vid-usage'); if (!el) return;
+  MEDIA.list().then(all => { if (!el.isConnected) return; const mb = all.reduce((a, x) => a + x.size, 0) / 1e6; el.textContent = all.length ? `${all.length} ${all.length === 1 ? 'vídeo guardado' : 'vídeos guardados'} · ${fk(Math.round(mb * 10) / 10)} MB` : 'No hay vídeos guardados.'; })
+    .catch(() => { el.textContent = 'Este navegador no permite guardar vídeos.'; });
+}
 function viewSettings() {
   let h = `<div class="top"><div class="brand">${brandMark}<h1 class="display">Perfiles</h1></div></div>`;
   h += `<div class="card"><h3>Quién entrena</h3><p class="small muted" style="margin-bottom:6px">Cada persona tiene sus pesos, sus vídeos analizados y su historial. Si entrenáis juntos, en cada ejercicio aparecen el peso y las series de todos.</p>`;
@@ -2204,6 +2303,9 @@ function viewSettings() {
       <div class="row"><button class="btn" data-act="backup">Descargar copia</button><label class="btn">Restaurar copia<input class="vh" type="file" accept=".json,application/json" data-restore="1"></label></div></div>`;
     if (S.installEvt) h += `<div class="card"><h3>Instalar en el móvil</h3><p class="small muted">Añade Discos a tu pantalla de inicio para abrirla como una app, también sin conexión.</p><button class="btn primary" data-act="install">Instalar Discos</button></div>`;
   }
+  h += `<div class="card"><h3>Vídeos de técnica</h3><p class="small muted">Los vídeos que grabas se guardan solo en este móvil, para verlos en Progreso → Técnica y comparar unas sesiones con otras. Ocupan espacio: borra los que no necesites.</p>
+    <div class="field"><span>Guardar los vídeos</span><div class="seg-ctl">${[['1', 'Sí'], ['0', 'No']].map(([k, l]) => `<button aria-pressed="${keepVideos() === (k === '1')}" data-act="keep-videos" data-v="${k}">${l}</button>`).join('')}</div></div>
+    <p class="small" id="vid-usage" style="margin:0 0 10px">Calculando…</p><button class="btn" data-act="del-all-videos">Borrar todos los vídeos</button></div>`;
   h += `<div class="card"><h3>Datos</h3><p class="small muted">Borra perfiles, entrenos, pesos y análisis, y deja solo la rutina inicial${STANDALONE ? '' : '. En todos tus dispositivos'}.</p><button class="btn" data-act="reset-all">Borrar todos los datos</button></div>`;
   h += `<p class="small muted">${S.synced ? 'Los datos se guardan en este dispositivo y en tu cuenta de Claude, así que los verás igual desde otro móvil u ordenador.' : 'Los datos se guardan en este dispositivo.'} Los vídeos no se suben a ningún sitio: se quedan en tu móvil.</p>`;
   return h;
@@ -2223,6 +2325,7 @@ function sheetEditEntry(sid, k) {
 }
 async function resetAll() {
   const old = Object.keys(S.sessions);
+  MEDIA.clear().catch(() => {});
   stopTimer();
   S.app = defaultApp(); S.app.epoch = CODE_EPOCH + '-' + uid();
   S.sessions = {}; S.live = null; S.cal = null; S.prog = {pid: null, key: null, metric: 'top'}; S.view = 'home';
@@ -2249,6 +2352,7 @@ function sheetAddPart() {
     <div class="row" style="margin-top:16px"><button class="btn" data-act="new-profile" data-ctx="live">Crear perfil nuevo</button><button class="btn ghost" data-act="close-sheet">Cerrar</button></div>`);
 }
 function deleteSessionsOf(pid) {
+  mediaDelWhere(x => x.pid === pid);
   for (const id of Object.keys(S.sessions)) if (S.sessions[id].pid === pid) {
     delete S.sessions[id];
     if (S.sessCol) remoteWrite(id, () => S.sessCol.doc(id).delete());
@@ -2345,6 +2449,18 @@ const ACT = {
     const i = +t.dataset.i, j = +t.dataset.j, pid = t.dataset.pid; const en = getEntry(pid, i, false); const s = en && en.sets[j];
     if (!s) return; s.skip = false; saveSession(sessionId(pid)); rerenderPerson(i, pid); renderHead(); toast(`Serie ${j + 1} recuperada`);
   },
+  'prog-tab': t => { S.prog.tab = t.dataset.v; render(); },
+  'tech-play': t => { const box = t.closest('.vbox'); MEDIA.get(t.dataset.media).then(rec => { if (rec && box) playStored(box, rec.blob); else toast('Este vídeo no está en este móvil.'); }).catch(() => toast('No se ha podido abrir el vídeo.')); },
+  'tech-delvid': t => {
+    const id = t.dataset.media;
+    sheetConfirm('Se borrará el vídeo de este móvil. La nota y las correcciones se mantienen.', 'Borrar vídeo', () => {
+      MEDIA.del(id).catch(() => {}).then(() => { const [sid, k] = id.split('|'); const s = S.sessions[sid]; if (s && s.entries[k]) { s.entries[k].video = null; saveSession(sid); } render(); toast('Vídeo borrado'); });
+    });
+  },
+  'keep-videos': t => { S.app.settings.keepVideos = t.dataset.v === '1'; saveApp(); render(); },
+  'del-all-videos': () => sheetConfirm('Se borrarán todos los vídeos guardados en este móvil. Las notas y correcciones se mantienen.', 'Borrar vídeos', () => {
+    MEDIA.clear().catch(() => {}).then(() => { for (const s of Object.values(S.sessions)) { let ch = false; for (const k in (s.entries || {})) if (s.entries[k].video) { s.entries[k].video = null; ch = true; } if (ch) saveSession(s.id); } render(); toast('Vídeos borrados'); });
+  }),
   'skip-set': t => {
     const i = +t.dataset.i, pid = t.dataset.pid; const en = getEntry(pid, i, true);
     const s = en.sets.find(x => !x.done && !x.skip); if (!s) return;
