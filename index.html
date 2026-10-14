@@ -421,6 +421,28 @@ h2.sec{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--
 .score-b{flex:none;font-size:24px;font-weight:800;letter-spacing:-.03em;background:var(--surface-2);border-radius:12px;padding:4px 10px}
 .score-b small{font-size:13px;color:var(--ink-2);font-weight:700}
 .vbox{margin-top:10px}
+.notes{margin:0 0 12px;display:grid;gap:8px}
+.note-u{background:color-mix(in srgb,var(--yellow) 16%,var(--surface));border-radius:14px;padding:10px 12px}
+.note-u b{font-size:12.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2)}
+.note-u p{margin:4px 0 0;font-size:14.5px;line-height:1.45}
+.note-ai{background:var(--surface-2);border-radius:14px;padding:10px 12px}
+.note-ai summary{cursor:pointer;font-weight:700;font-size:13.5px}
+.note-ai ul{margin:8px 0 0;padding-left:18px;font-size:14px;line-height:1.45}
+.note-ai li{margin-bottom:5px}
+.note-btn{justify-self:start}
+.cmp-sel{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cmp-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cmp-col{min-width:0}
+.cmp-h{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-bottom:8px}
+.cmp-h > span:first-child{width:100%}
+.cmp-h .score-b{font-size:18px;padding:2px 8px;margin-left:auto}
+.cmp-vid video{width:100%;aspect-ratio:9/16;object-fit:contain;border-radius:12px;background:#000}
+.cmp-row{display:grid;grid-template-columns:22px 1fr 1fr;gap:8px;align-items:center;margin-bottom:8px}
+.cmp-row img{width:100%;border-radius:10px;display:block}
+.cmp-row img.flag{outline:3px solid var(--red);outline-offset:-3px}
+.cmp-row .k{font-weight:800;color:var(--ink-2);text-align:center}
+.cmp-delta{display:flex;align-items:center;gap:14px}
+.cmp-delta b{font-size:34px;letter-spacing:-.03em}
 .vbox video{width:100%;max-height:60vh;border-radius:14px;background:#000}
 .vbox .frames{margin-bottom:8px}
 .sess{display:flex;align-items:center;gap:6px}
@@ -1331,15 +1353,16 @@ function plateIcon(n, color, size = 64) {
 }
 const brandMark = `<svg width="30" height="30" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="var(--red)"/><circle cx="32" cy="32" r="21" fill="var(--blue)"/><circle cx="32" cy="32" r="12" fill="var(--yellow)"/><circle cx="32" cy="32" r="5" fill="var(--surface)"/></svg>`;
 function profileChip() { const p = activeProfile(); return `<button class="pchip" data-act="pick-profile"><span class="dot c-${esc(p.color)}"></span>${esc(p.name)}</button>`; }
-function setNav() { $$('#nav button').forEach(b => b.setAttribute('aria-current', b.dataset.v === S.view ? 'page' : 'false')); }
+function setNav() { const cv = S.view === 'compare' ? 'settings' : S.view; $$('#nav button').forEach(b => b.setAttribute('aria-current', b.dataset.v === cv ? 'page' : 'false')); }
 
 function render() {
   setNav();
   const v = S.view;
-  const html = v === 'calendar' ? viewCalendar() : v === 'progress' ? viewProgress() : v === 'settings' ? viewSettings() : viewHome();
+  const html = v === 'compare' ? viewCompare() : v === 'calendar' ? viewCalendar() : v === 'progress' ? viewProgress() : v === 'settings' ? viewSettings() : viewHome();
   $('#app').innerHTML = `<div class="wrap">${html}</div>`;
   if (v === 'progress' && S.prog.tab === 'tech') hydrateTech();
   if (v === 'settings') fillVideoUsage();
+  if (v === 'compare') hydrateCompare();
 }
 function viewHome() {
   const r = routine();
@@ -1666,12 +1689,32 @@ function personHTML(i, pid) {
   const nextPending = sets.findIndex(s => !s.done && !s.skip);
   return `<div class="card person${all ? ' complete' : ''}" id="pp-${i}-${pid}" data-def="${sg.kg != null ? sg.kg : ''}">
     <div class="p-head"><div class="p-who">${multi ? `<span class="dot sm c-${esc(p.color)}"></span>${esc(p.name)}` : 'Peso para hoy'}${all ? '<span class="okmark">Hecho</span>' : ''}</div>${kgBox}</div>
-    <p class="small p-why">${why}</p>${plates}
+    <p class="small p-why">${why}</p>${notesHTML(pid, ex.key, ex.name)}${plates}
     <div class="sets">${rows}</div>
     ${nextPending >= 0 ? `<div class="row" style="margin-top:10px"><button class="btn sm" data-act="skip-set" data-i="${i}" data-pid="${pid}">Saltar serie ${nextPending + 1}</button></div>` : ''}
     ${ex.per ? `<p class="small muted" style="margin:10px 0 0">Cada serie son ${ex.reps} ${ex.unit === 's' ? 'segundos' : ex.unit === 'm' ? 'metros' : 'repeticiones'} por ${esc(ex.per)}.</p>` : ''}
   </div>`;
 }
+const getNote = (pid, key) => (S.app.notes && S.app.notes[pid] && S.app.notes[pid][key]) || null;
+function lastAiFixes(pid, key, upTo) {
+  const it = techItems(pid, key).filter(x => x.en.ai && (x.en.ai.corregir || []).length && (!upTo || x.date <= upTo)).pop();
+  return it ? {date: it.date, fixes: it.en.ai.corregir} : null;
+}
+function notesHTML(pid, key, name, standalone) {
+  const n = getNote(pid, key), ai = lastAiFixes(pid, key, S.live ? S.live.date : null);
+  let h = '';
+  if (n && n.text) h += `<div class="note-u"><b>Tu nota</b><p>${esc(n.text).replace(/\n/g, '<br>')}</p></div>`;
+  if (ai) h += `<details class="note-ai"${standalone ? ' open' : ''}><summary>Correcciones de la IA · ${esc(fDate(ai.date))} (${ai.fixes.length})</summary><ul>${ai.fixes.map(c => `<li><b>${esc(c.problema)}</b>${c.como ? ': ' + esc(c.como) : ''}</li>`).join('')}</ul></details>`;
+  h += `<button class="linkish small note-btn" data-act="note-edit" data-pid="${pid}" data-key="${esc(key)}" data-name="${esc(name)}">${n && n.text ? 'Editar mi nota' : 'Añadir una nota para la próxima vez'}</button>`;
+  return `<div class="notes">${h}</div>`;
+}
+function sheetNote(pid, key, name) {
+  const n = getNote(pid, key), p = profile(pid);
+  openSheet(`<h3 class="display">Nota: ${esc(name)}</h3><p class="small muted" style="margin-top:-6px">${S.app.profiles.length > 1 && p ? esc(p.name) + ' · ' : ''}Te aparecerá cada vez que te toque este ejercicio.</p>
+    <label class="field"><span>Tu nota</span><textarea class="inp" id="note-t" rows="5" maxlength="600" placeholder="Por ejemplo: banco en la posición 4, agarre algo más abierto, cuidado con la rodilla izquierda…">${esc((n && n.text) || '')}</textarea></label>
+    <div class="row"><button class="btn primary" data-act="note-save" data-pid="${pid}" data-key="${esc(key)}">Guardar</button>${n && n.text ? `<button class="btn" data-act="note-del" data-pid="${pid}" data-key="${esc(key)}">Borrar nota</button>` : ''}<button class="btn ghost" data-act="close-sheet">Cancelar</button></div>`);
+}
+function afterNoteChange() { closeSheet(); if (S.live && !$('#session').classList.contains('hide')) refreshPages(); else render(); }
 function renderPeople(i) {
   const box = $('#people-' + i); if (!box) return;
   box.innerHTML = S.live.parts.map(pid => personHTML(i, pid)).join('');
@@ -1734,18 +1777,14 @@ function renderRec(i) {
     }
   }
   const cur = (v && v.ai) || (en && en.ai);
-  if (cur) h += aiHTML(cur, v && v.frames ? v.frames.length : cur.frames);
-  else {
-    const prev = history(pid, ex.key).filter(x => x.en.ai && x.date < S.live.date).pop();
-    if (prev) h += `<details class="prev"><summary>Análisis anterior (${esc(fDate(prev.date))}${prev.en.ai.puntuacion ? ' · ' + prev.en.ai.puntuacion + '/10' : ''})</summary>${aiHTML(prev.en.ai)}</details>`;
-  }
+  if (cur) h += aiHTML(cur, v && v.frames ? v.frames.length : cur.frames, true);
   box.innerHTML = h;
 }
-function aiHTML(ai, nFrames) {
+function aiHTML(ai, nFrames, inSession) {
   let h = `<div class="ai-out">`;
   if (ai.puntuacion != null) h += `<div class="score"><b class="display num">${ai.puntuacion}<span class="muted" style="font-size:22px">/10</span></b><span class="small muted">Nota de técnica${ai.date && ai.date !== todayISO() ? ' · ' + esc(fDate(ai.date)) : ''}</span></div>`;
   if (ai.resumen) h += `<p>${esc(ai.resumen)}</p>`;
-  if (ai.comparacion) h += `<p class="note small"><b>Respecto a la vez anterior:</b> ${esc(ai.comparacion)}</p>`;
+  if (ai.comparacion && !inSession) h += `<p class="note small"><b>Respecto a la vez anterior:</b> ${esc(ai.comparacion)}</p>`;
   if (ai.seguridad) h += `<p class="warn small"><b>Ojo:</b> ${esc(ai.seguridad)}</p>`;
   if (ai.corregir && ai.corregir.length) h += `<h4>Qué corregir</h4><ul class="fixes">${ai.corregir.map(c => `<li><b>${esc(c.problema)}</b>${esc(c.como)}${c.fotogramas && c.fotogramas.length ? `<div class="tiny muted">Fotograma${c.fotogramas.length > 1 ? 's' : ''} ${c.fotogramas.join(', ')}</div>` : ''}</li>`).join('')}</ul>`;
   if (ai.bien && ai.bien.length) h += `<h4>Lo que haces bien</h4><ul class="good small">${ai.bien.map(t => `<li>${esc(t)}</li>`).join('')}</ul>`;
@@ -2222,7 +2261,8 @@ function techItems(pid, key) {
 function viewTech(pid, key, p) {
   const items = techItems(pid, key), multi = S.app.profiles.length > 1;
   if (!items.length) return `<div class="empty">Todavía no hay vídeos ni correcciones de este ejercicio${multi ? ' para ' + esc(p.name) : ''}. Grábate en la pestaña «Grábate» del ejercicio: aquí verás tus vídeos y cómo evoluciona tu técnica.</div>`;
-  let h = '';
+  let h = `<div class="card"><h3>Notas de este ejercicio</h3>${notesHTML(pid, key, (items[items.length - 1] || {en: {}}).en.name || '', true)}</div>`;
+  if (items.filter(x => x.en.video).length >= 2) h += `<button class="btn block" style="margin-bottom:12px" data-act="cmp-open" data-pid="${pid}" data-key="${esc(key)}">Comparar dos vídeos</button>`;
   const scored = items.filter(x => x.en.ai && x.en.ai.puntuacion != null);
   if (scored.length) {
     const byD = {}; scored.forEach(x => { byD[x.date] = {date: x.date, y: x.en.ai.puntuacion}; });
@@ -2254,19 +2294,166 @@ function hydrateTech() {
     }).catch(() => { box.innerHTML = '<p class="tiny muted">No se ha podido abrir el vídeo.</p>'; });
   });
 }
-function playStored(box, blob) {
+function playStored(box, blob, noAuto) {
   const v = document.createElement('video'); v.controls = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'metadata';
   let url = null; try { url = URL.createObjectURL(blob); } catch {}
   const asData = () => { const r = new FileReader(); r.onload = () => { v.src = r.result; }; r.readAsDataURL(blob); };
   v.addEventListener('error', () => { if (url && v.src.startsWith('blob:')) { try { URL.revokeObjectURL(url); } catch {} url = null; asData(); } }, {once: true});
   if (url) v.src = url; else asData();
   box.innerHTML = ''; box.appendChild(v);
-  try { v.play().catch(() => {}); } catch {}
+  if (!noAuto) { try { v.play().catch(() => {}); } catch {} }
 }
 function fillVideoUsage() {
   const el = $('#vid-usage'); if (!el) return;
   MEDIA.list().then(all => { if (!el.isConnected) return; const mb = all.reduce((a, x) => a + x.size, 0) / 1e6; el.textContent = all.length ? `${all.length} ${all.length === 1 ? 'vídeo guardado' : 'vídeos guardados'} · ${fk(Math.round(mb * 10) / 10)} MB` : 'No hay vídeos guardados.'; })
     .catch(() => { el.textContent = 'Este navegador no permite guardar vídeos.'; });
+}
+function viewCompare() {
+  const C = S.cmp || {}; const p = profile(C.pid);
+  if (!p) { S.view = 'settings'; return viewSettings(); }
+  const keys = new Map();
+  for (const s of Object.values(S.sessions)) if (s.pid === C.pid) for (const k in (s.entries || {})) { const en = s.entries[k]; if (en && en.video) keys.set(en.key, en.name); }
+  let h = `<div class="top"><div><button class="linkish small" data-act="cmp-back">‹ Volver</button><h1 class="display" style="font-size:28px;margin-top:6px">Comparar vídeos</h1>${S.app.profiles.length > 1 ? `<p class="small muted" style="margin:4px 0 0">${esc(p.name)}</p>` : ''}</div></div>`;
+  if (!keys.size) return h + `<div class="empty">Todavía no hay vídeos guardados${S.app.profiles.length > 1 ? ' de ' + esc(p.name) : ''}. Grábate en la pestaña «Grábate» de un ejercicio; cuando tengas dos vídeos del mismo ejercicio podrás compararlos aquí.</div>`;
+  const vidCount = key => techItems(C.pid, key).filter(x => x.en.video).length;
+  if (!C.key || !keys.has(C.key)) C.key = [...keys.keys()].sort((a, b) => vidCount(b) - vidCount(a))[0];
+  h += `<label class="field"><span>Ejercicio</span><select class="inp" data-ch="cmp-ex">${[...keys].map(([k, n]) => `<option value="${esc(k)}" ${k === C.key ? 'selected' : ''}>${esc(n)} (${vidCount(k)})</option>`).join('')}</select></label>`;
+  const items = techItems(C.pid, C.key).filter(x => x.en.video);
+  const idOf = x => `${x.s.id}|${x.k}`;
+  if (items.length < 2) return h + `<div class="empty">Solo hay un vídeo de este ejercicio. Graba otro en una próxima sesión para comparar.</div>`;
+  if (!items.find(x => idOf(x) === C.a)) C.a = idOf(items[0]);
+  if (!items.find(x => idOf(x) === C.b) || C.b === C.a) C.b = idOf(items[items.length - 1]);
+  const A = items.find(x => idOf(x) === C.a), B = items.find(x => idOf(x) === C.b);
+  const opt = (sel) => items.map(x => `<option value="${esc(idOf(x))}" ${idOf(x) === sel ? 'selected' : ''}>${esc(fDate(x.date))}${x.en.ai && x.en.ai.puntuacion != null ? ' · ' + x.en.ai.puntuacion + '/10' : ''}</option>`).join('');
+  h += `<div class="cmp-sel"><label class="field"><span>Antes</span><select class="inp" data-ch="cmp-a">${opt(C.a)}</select></label><label class="field"><span>Después</span><select class="inp" data-ch="cmp-b">${opt(C.b)}</select></label></div>`;
+  const col = (x, lab) => { const ai = x.en.ai; return `<div class="cmp-col"><div class="cmp-h"><span class="small muted">${lab}</span><b>${esc(fDate(x.date))}</b>${ai && ai.puntuacion != null ? `<span class="score-b">${ai.puntuacion}<small>/10</small></span>` : '<span class="small muted">Sin nota</span>'}</div><div class="cmp-vid" data-media="${esc(idOf(x))}"><p class="tiny muted">Cargando…</p></div></div>`; };
+  h += `<div class="card"><div class="cmp-grid">${col(A, 'Antes')}${col(B, 'Después')}</div>
+    <div class="row" style="margin-top:12px"><button class="btn primary" data-act="cmp-play">Reproducir los dos</button><button class="btn" data-act="cmp-slow" aria-pressed="${!!C.slow}">${C.slow ? 'Velocidad normal' : 'Cámara lenta'}</button></div></div>`;
+  const sa = A.en.ai && A.en.ai.puntuacion, sb = B.en.ai && B.en.ai.puntuacion;
+  if (sa != null && sb != null) h += `<div class="card cmp-delta"><b class="display num">${sb - sa > 0 ? '+' : ''}${sb - sa}</b><span>${sb > sa ? 'Tu nota de técnica ha subido' : sb < sa ? 'Tu nota de técnica ha bajado' : 'Tu nota de técnica es la misma'}: de ${sa} a ${sb} sobre 10.</span></div>`;
+  if (B.en.ai && B.en.ai.comparacion) h += `<p class="note small"><b>La IA, respecto a la vez anterior:</b> ${esc(B.en.ai.comparacion)}</p>`;
+  h += `<div class="card"><h3>Fotograma a fotograma</h3><div class="cmp-frames" id="cmp-frames"><p class="tiny muted">Cargando…</p></div></div>`;
+  const fx = x => x.en.ai && x.en.ai.corregir && x.en.ai.corregir.length ? `<ul class="fixes">${x.en.ai.corregir.map(c => `<li><b>${esc(c.problema)}</b>${esc(c.como)}</li>`).join('')}</ul>` : '<p class="small muted">Sin correcciones.</p>';
+  h += `<div class="card"><h3>Qué había que corregir</h3><div class="cmp-grid"><div><p class="small muted" style="margin:0 0 6px">${esc(fDate(A.date))}</p>${fx(A)}</div><div><p class="small muted" style="margin:0 0 6px">${esc(fDate(B.date))}</p>${fx(B)}</div></div></div>`;
+  return h;
+}
+function hydrateCompare() {
+  const C = S.cmp || {}; const boxes = $$('.cmp-vid[data-media]'); if (boxes.length < 2) return;
+  Promise.all(boxes.map(b => MEDIA.get(b.dataset.media).catch(() => null))).then(recs => {
+    recs.forEach((rec, n) => {
+      const box = boxes[n]; if (!box.isConnected) return;
+      if (!rec) { box.innerHTML = '<p class="tiny muted">Este vídeo no está en este móvil.</p>'; return; }
+      playStored(box, rec.blob, true);
+      const v = box.querySelector('video'); if (v) { v.muted = true; v.playbackRate = C.slow ? 0.5 : 1; }
+    });
+    const fr = $('#cmp-frames'); if (!fr) return;
+    const [a, b] = recs; const ta = (a && a.thumbs) || [], tb = (b && b.thumbs) || [];
+    const flags = id => { const [sid, k] = id.split('|'); const s = S.sessions[sid], en = s && s.entries[k]; return new Set(((en && en.ai && en.ai.corregir) || []).flatMap(c => c.fotogramas || [])); };
+    const fa = flags(boxes[0].dataset.media), fb = flags(boxes[1].dataset.media);
+    const n = Math.max(ta.length, tb.length);
+    fr.innerHTML = n ? Array.from({length: n}, (_, k) => `<div class="cmp-row"><span class="k num">${k + 1}</span>${ta[k] ? `<img class="${fa.has(k + 1) ? 'flag' : ''}" src="${ta[k]}" alt="Antes, fotograma ${k + 1}">` : '<span></span>'}${tb[k] ? `<img class="${fb.has(k + 1) ? 'flag' : ''}" src="${tb[k]}" alt="Después, fotograma ${k + 1}">` : '<span></span>'}</div>`).join('') + '<p class="tiny muted" style="margin:8px 0 0">Con borde de color: los fotogramas donde la IA vio algo que corregir.</p>' : '<p class="tiny muted">Sin fotogramas guardados.</p>';
+  });
+}
+
+/* ================= 3. Exportar historial a Excel (.xlsx sin librerías) ================= */
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = b => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+function zipStore(files) {
+  const enc = new TextEncoder(), parts = [], cen = []; let off = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name), data = typeof f.data === 'string' ? enc.encode(f.data) : f.data, crc = crc32(data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true); lh.setUint16(10, 0, true); lh.setUint16(12, 0x21, true);
+    lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true); lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true);
+    parts.push(new Uint8Array(lh.buffer), name, data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true); ch.setUint16(12, 0, true); ch.setUint16(14, 0x21, true);
+    ch.setUint32(16, crc, true); ch.setUint32(20, data.length, true); ch.setUint32(24, data.length, true); ch.setUint16(28, name.length, true); ch.setUint32(42, off, true);
+    cen.push(new Uint8Array(ch.buffer), name);
+    off += 30 + name.length + data.length;
+  }
+  const cenSize = cen.reduce((a, x) => a + x.length, 0), end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true); end.setUint32(12, cenSize, true); end.setUint32(16, off, true);
+  const all = [...parts, ...cen, new Uint8Array(end.buffer)], out = new Uint8Array(all.reduce((a, x) => a + x.length, 0)); let p = 0;
+  for (const x of all) { out.set(x, p); p += x.length; }
+  return out;
+}
+function xlsxBuild(sheets) {
+  const xe = s => String(s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const colL = n => { let s = ''; n++; while (n) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
+  const serial = iso => { const [y, m, d] = iso.split('-').map(Number); return (Date.UTC(y, m - 1, d) - Date.UTC(1899, 11, 30)) / 864e5; };
+  const sheetXml = sh => {
+    const rows = [sh.head, ...sh.rows].map((r, ri) => `<row r="${ri + 1}">${r.map((v, ci) => {
+      const ref = colL(ci) + (ri + 1);
+      if (ri === 0) return `<c r="${ref}" t="inlineStr" s="1"><is><t>${xe(v)}</t></is></c>`;
+      if (v == null || v === '') return '';
+      if (typeof v === 'number' && isFinite(v)) return `<c r="${ref}"><v>${v}</v></c>`;
+      if (typeof v === 'object' && v.date) return `<c r="${ref}" s="2"><v>${serial(v.date)}</v></c>`;
+      return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xe(v)}</t></is></c>`;
+    }).join('')}</row>`).join('');
+    const cols = sh.widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('');
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${cols}</cols><sheetData>${rows}</sheetData></worksheet>`;
+  };
+  const n = sheets.length;
+  return zipStore([
+    {name: '[Content_Types].xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`},
+    {name: '_rels/.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`},
+    {name: 'xl/workbook.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((s, i) => `<sheet name="${xe(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>`},
+    {name: 'xl/_rels/workbook.xml.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}<Relationship Id="rId${n + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`},
+    {name: 'xl/styles.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`},
+    ...sheets.map((s, i) => ({name: `xl/worksheets/sheet${i + 1}.xml`, data: sheetXml(s)}))
+  ]);
+}
+function exportSheets(pidSel) {
+  const pf = id => pidSel === 'all' || id === pidSel;
+  const ses = Object.values(S.sessions).filter(s => profile(s.pid) && pf(s.pid)).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  const pname = id => (profile(id) || {}).name || '';
+  const wk = iso => `${parseISO(weekStartISO(iso)).getFullYear()}-S${String(isoWeekNo(iso)).padStart(2, '0')}`;
+  const day = s => (s.dayTitle || '').replace(/^Día \d+:\s*/, '');
+  const series = [], sesRows = [], tech = [];
+  for (const s of ses) {
+    const ks = Object.keys(s.entries || {}).sort((a, b) => a - b); const x = sessStats(s);
+    if (x.sets) sesRows.push([{date: s.date}, wk(s.date), pname(s.pid), day(s), x.n, x.sets, Math.round(x.vol)]);
+    for (const k of ks) {
+      const en = s.entries[k], tg = en.target || {}, u = tg.unit === 's' ? 'segundos' : tg.unit === 'm' ? 'metros' : 'repeticiones';
+      (en.sets || []).forEach((st, j) => { if (st.done || st.skip) series.push([{date: s.date}, wk(s.date), pname(s.pid), day(s), en.name, j + 1, st.done ? (st.kg ?? 0) : null, st.done ? (st.reps ?? null) : null, u, st.done ? 'Hecha' : 'Saltada', pctText(tg) || tg.loadText || '']); });
+      if (en.ai) tech.push([{date: s.date}, pname(s.pid), en.name, en.ai.puntuacion ?? '', en.ai.resumen || '', (en.ai.corregir || []).map(c => c.problema + (c.como ? ': ' + c.como : '')).join(' | '), en.ai.comparacion || '', en.video ? 'Sí' : 'No']);
+    }
+  }
+  const notes = [];
+  for (const pid in (S.app.notes || {})) if (profile(pid) && pf(pid)) for (const key in S.app.notes[pid]) { const n = S.app.notes[pid][key]; if (n && n.text) { const nm = (exOptions(pid).find(o => o.key === key) || {}).name || key; notes.push([pname(pid), nm, n.text, n.at ? {date: isoDate(new Date(n.at))} : '']); } }
+  return [
+    {name: 'Series', head: ['Fecha', 'Semana', 'Persona', 'Día', 'Ejercicio', 'Serie', 'Kg', 'Reps / tiempo', 'Unidad', 'Estado', 'Carga de la rutina'], widths: [11, 10, 12, 30, 34, 7, 8, 13, 13, 9, 18], rows: series},
+    {name: 'Sesiones', head: ['Fecha', 'Semana', 'Persona', 'Día', 'Ejercicios', 'Series hechas', 'Volumen (kg)'], widths: [11, 10, 12, 34, 10, 13, 13], rows: sesRows},
+    {name: 'Técnica', head: ['Fecha', 'Persona', 'Ejercicio', 'Nota (/10)', 'Resumen', 'Qué corregir', 'Respecto a la vez anterior', 'Vídeo guardado'], widths: [11, 12, 34, 10, 50, 60, 50, 14], rows: tech},
+    {name: 'Notas', head: ['Persona', 'Ejercicio', 'Nota', 'Última edición'], widths: [12, 34, 60, 14], rows: notes}
+  ];
+}
+function u8ToB64(u8) { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); }
+function doExport(pidSel) {
+  const sheets = exportSheets(pidSel);
+  if (!sheets[0].rows.length && !sheets[2].rows.length && !sheets[3].rows.length) { toast('Todavía no hay nada que exportar.'); return; }
+  const bytes = xlsxBuild(sheets), mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  const who = pidSel === 'all' ? '' : '-' + norm(pname0(pidSel)).replace(/[^a-z0-9]+/g, '-');
+  const name = `discos-historial${who}-${todayISO()}.xlsx`;
+  if (window.DiscosAndroid) {
+    if (!window.DiscosAndroid.saveFile) { toast('Para exportar desde la app de Android, instala la versión nueva de Discos.apk.'); return; }
+    const r = window.DiscosAndroid.saveFile(name, u8ToB64(bytes), mime);
+    toast(r === 'downloads' ? 'Excel guardado en la carpeta Descargas' : r === 'app' ? 'Excel guardado en Android/data/es.discos.app' : 'No se ha podido guardar el Excel');
+    return;
+  }
+  if (window.claude) { toast('La exportación funciona en la app instalada (GitHub Pages o Android).'); return; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], {type: mime})); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  toast('Excel descargado');
+}
+const pname0 = id => (profile(id) || {}).name || '';
+function sheetExport() {
+  const multi = S.app.profiles.length > 1;
+  if (!multi) { doExport('all'); return; }
+  openSheet(`<h3 class="display">Exportar historial</h3><p class="small muted" style="margin-top:-6px">Un Excel con cuatro hojas: series, sesiones, técnica y notas.</p>
+    <div style="display:grid;gap:8px"><button class="btn primary" data-act="do-export" data-v="all">De todo el grupo</button>${S.app.profiles.map(q => `<button class="btn" data-act="do-export" data-v="${q.id}"><span class="dot sm c-${esc(q.color)}"></span>Solo de ${esc(q.name)}</button>`).join('')}</div>
+    <div class="row" style="margin-top:12px"><button class="btn ghost" data-act="close-sheet">Cancelar</button></div>`);
 }
 function viewSettings() {
   let h = `<div class="top"><div class="brand">${brandMark}<h1 class="display">Perfiles</h1></div></div>`;
@@ -2277,6 +2464,9 @@ function viewSettings() {
       <div class="acts">${p.id !== S.app.activeProfileId ? `<button class="btn sm" data-act="set-profile" data-id="${p.id}">Usar</button>` : ''}<button class="btn sm" data-act="edit-profile" data-id="${p.id}">Editar</button>${S.app.profiles.length > 1 ? `<button class="btn sm ghost" data-act="del-profile" data-id="${p.id}" aria-label="Borrar ${esc(p.name)}">Borrar</button>` : ''}</div></div>`;
   }).join('');
   h += `<div class="row" style="margin-top:10px"><button class="btn primary" data-act="new-profile">Crear perfil</button></div></div>`;
+  h += `<div class="card"><h3>Evolución de la técnica</h3><p class="small muted" style="margin-bottom:10px">Compara dos vídeos de un mismo ejercicio, uno junto al otro, para ver cómo ha cambiado tu técnica.</p>
+    <div class="row">${S.app.profiles.map(q => `<button class="btn" data-act="cmp-open" data-pid="${q.id}"><span class="dot sm c-${esc(q.color)}"></span>${S.app.profiles.length > 1 ? 'Vídeos de ' + esc(q.name) : 'Comparar mis vídeos'}</button>`).join('')}</div></div>`;
+  h += `<div class="card"><h3>Exportar historial</h3><p class="small muted" style="margin-bottom:10px">Descarga un Excel con todos los entrenos (cada serie con sus kilos y repeticiones), las notas de técnica y tus notas.</p><button class="btn" data-act="export">Exportar a Excel</button></div>`;
   h += `<div class="card"><h3>Rutinas</h3>` + (S.app.routines.length ? [...S.app.routines].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map(r => `<div class="list-item"><div class="grow"><b>${esc(r.name)}</b><span class="small muted">${r.createdAt ? 'Añadida el ' + fDate(isoDate(new Date(r.createdAt))) + ' · ' : ''}${r.days.length} días · ${r.days.reduce((a, d) => a + d.exercises.length, 0)} ejercicios${r.id === S.app.activeRoutineId ? ' · activa' : ''}</span></div>
       <div class="acts">${r.id !== S.app.activeRoutineId ? `<button class="btn sm" data-act="set-routine" data-id="${r.id}">Usar</button>` : ''}<button class="btn sm" data-act="ren-routine" data-id="${r.id}">Renombrar</button><button class="btn sm ghost" data-act="del-routine" data-id="${r.id}">Borrar</button></div></div>`).join('') : '<p class="small muted">No hay rutinas.</p>') +
     `<div class="row" style="margin-top:10px"><button class="btn" data-act="import">Pegar otra rutina</button></div></div>`;
@@ -2461,6 +2651,20 @@ const ACT = {
   'del-all-videos': () => sheetConfirm('Se borrarán todos los vídeos guardados en este móvil. Las notas y correcciones se mantienen.', 'Borrar vídeos', () => {
     MEDIA.clear().catch(() => {}).then(() => { for (const s of Object.values(S.sessions)) { let ch = false; for (const k in (s.entries || {})) if (s.entries[k].video) { s.entries[k].video = null; ch = true; } if (ch) saveSession(s.id); } render(); toast('Vídeos borrados'); });
   }),
+  'note-edit': t => sheetNote(t.dataset.pid, t.dataset.key, t.dataset.name || ''),
+  'note-save': t => {
+    const pid = t.dataset.pid, key = t.dataset.key, text = ($('#note-t').value || '').trim();
+    S.app.notes = S.app.notes || {}; S.app.notes[pid] = S.app.notes[pid] || {};
+    if (text) S.app.notes[pid][key] = {text, at: Date.now()}; else delete S.app.notes[pid][key];
+    saveApp(); afterNoteChange(); toast(text ? 'Nota guardada' : 'Nota borrada');
+  },
+  'note-del': t => { const m = S.app.notes && S.app.notes[t.dataset.pid]; if (m) delete m[t.dataset.key]; saveApp(); afterNoteChange(); toast('Nota borrada'); },
+  'cmp-open': t => { S.cmpFrom = S.view; S.cmp = {pid: t.dataset.pid, key: t.dataset.key || null, slow: false}; S.view = 'compare'; render(); window.scrollTo(0, 0); },
+  'cmp-back': () => { S.view = S.cmpFrom && S.cmpFrom !== 'compare' ? S.cmpFrom : 'settings'; render(); window.scrollTo(0, 0); },
+  'cmp-play': () => { const vs = $$('.cmp-vid video'); if (!vs.length) { toast('Los vídeos no están en este móvil.'); return; } vs.forEach(v => { try { v.pause(); v.currentTime = 0; v.playbackRate = S.cmp && S.cmp.slow ? 0.5 : 1; } catch {} }); vs.forEach(v => { try { v.play().catch(() => {}); } catch {} }); },
+  'cmp-slow': t => { S.cmp.slow = !S.cmp.slow; $$('.cmp-vid video').forEach(v => { v.playbackRate = S.cmp.slow ? 0.5 : 1; }); t.textContent = S.cmp.slow ? 'Velocidad normal' : 'Cámara lenta'; t.setAttribute('aria-pressed', S.cmp.slow ? 'true' : 'false'); },
+  export: () => sheetExport(),
+  'do-export': t => { closeSheet(); doExport(t.dataset.v); },
   'skip-set': t => {
     const i = +t.dataset.i, pid = t.dataset.pid; const en = getEntry(pid, i, true);
     const s = en.sets.find(x => !x.done && !x.skip); if (!s) return;
@@ -2618,6 +2822,8 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.dataset && t.dataset.vid != null && t.files && t.files[0]) { const f = t.files[0]; t.value = ''; handleVideo(+t.dataset.vid, f); return; }
   if (t.dataset && t.dataset.ch === 'prog-ex') { S.prog.key = t.value; render(); }
+  if (t.dataset && t.dataset.ch === 'cmp-ex') { S.cmp.key = t.value; S.cmp.a = S.cmp.b = null; render(); }
+  if (t.dataset && (t.dataset.ch === 'cmp-a' || t.dataset.ch === 'cmp-b')) { S.cmp[t.dataset.ch.slice(4)] = t.value; render(); }
   if (t.dataset && t.dataset.restore && t.files && t.files[0]) {
     const f = t.files[0]; t.value = '';
     f.text().then(txt => {
